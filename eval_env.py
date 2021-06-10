@@ -56,25 +56,35 @@ class ProofEnv:
             Undo - to backtrack one step
             other valid Coq commands
         """
+        self.num_tactics_left -= 1
+        if command == 'Undo.':
+            self.success = False
+
         if self.success:
             return self.feedback("ALREADY_SUCCEEDED")
         if self.failure:
             return self.feedback("ALREADY_FAILED")
         time_left = self.timeout - (time() - self.start_time)
-        print("%d: %s: %.02f" % (self.num_tactics_left, command, time_left))
+        #print("%d: %s: %.02f" % (self.num_tactics_left, command, time_left))
         if time_left <= 0:
             return self.feedback("MAX_TIME_REACHED")
 
         self.serapi.push()  # save the state before executing the command
         try:
             ast = sexpdata.dumps(self.serapi.query_ast(command))
-            if "VernacExtend" in ast:  # is a tactic
+            if "VernacExtend" in ast:  # is a tactic 
                 if self.num_tactics_left <= 0:
                     self.serapi.pop()
                     return self.feedback("MAX_NUM_TACTICS_REACHED")
-                self.num_tactics_left -= 1
-                command = "timeout %d (%s)." % (time_left, command[:-1])
+                #self.num_tactics_left -= 1
+                
+                if "all" in command[:-1]:
+                    command = "all: timeout %d (%s)." % (time_left, command[:-1].replace("all: ", ""))
+                else:
+                    command = "timeout %d (%s)." % (time_left, command[:-1])
+            
             responses, _ = self.serapi.execute(command)
+            
             states_cnt = self.serapi.pull()  # delete the saved state if no error
         except CoqExn as ex:
             self.serapi.pop()  # restore the state
@@ -134,7 +144,7 @@ class FileEnv:
     """
 
     def __init__(
-        self, filename, max_num_tactics, timeout, with_hammer=None, hammer_timeout=None
+        self, filename, max_num_tactics, timeout, with_hammer=None, hammer_timeout=None, testmode=True
     ):
         """
         filename - the json file in CoqGym
@@ -148,10 +158,15 @@ class FileEnv:
         self.timeout = timeout
         self.with_hammer = with_hammer
         self.hammer_timeout = hammer_timeout
+        self.testmode = testmode
         self.serapi = self.initialize_serapi()
+        
 
     def initialize_serapi(self):
-        serapi = SerAPI(timeout=1200)
+        if self.testmode:
+            serapi = SerAPI(timeout=1200)
+        else:
+            serapi = SerAPI(timeout=10)
         if self.with_hammer is not None:
             atp_limit = 29 * self.hammer_timeout // 60
             reconstr_limit = 28 * self.hammer_timeout // 60

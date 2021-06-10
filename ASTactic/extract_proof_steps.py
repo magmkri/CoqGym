@@ -13,7 +13,6 @@ from lark.exceptions import UnexpectedCharacters, ParseError
 from utils import iter_proofs, SexpCache
 import argparse
 from hashlib import md5
-from agent import filter_env
 import pdb
 
 
@@ -21,11 +20,23 @@ term_parser = GallinaTermParser(caching=True)
 sexp_cache = SexpCache("../sexp_cache", readonly=True)
 
 
+def filter_env(env):
+    "Get the last 10 toplevel constants"
+    filtered_env = []
+    toplevel_consts = [
+        const for const in env["constants"] if const["qualid"].startswith("SerTop")
+    ]
+    for const in toplevel_consts[-10:]:
+        ast = sexp_cache[const["sexp"]]
+        filtered_env.append({"qualid": const["qualid"], "text": const["type"], "ast": term_parser.parse(ast), "sexpression": ast})
+    return filtered_env
+
 def parse_goal(g):
     goal = {
         "id": g["id"],
         "text": g["type"],
         "ast": term_parser.parse(sexp_cache[g["sexp"]]),
+        "sexpression": sexp_cache[g["sexp"]]
     }
     local_context = []
     for i, h in enumerate(g["hypotheses"]):
@@ -35,6 +46,7 @@ def parse_goal(g):
                     "ident": ident,
                     "text": h["type"],
                     "ast": term_parser.parse(sexp_cache[h["sexp"]]),
+                    "sexpression": sexp_cache[h["sexp"]]
                 }
             )
     return local_context, goal
@@ -143,27 +155,21 @@ if __name__ == "__main__":
     arg_parser.add_argument(
         "--output", type=str, default="./proof_steps/", help="The output file"
     )
+    arg_parser.add_argument("--lightmode", default=False, type=bool,)
     arg_parser.add_argument("--filter", type=str, help="filter the proofs")
+
     args = arg_parser.parse_args()
     print(args)
 
     iter_proofs(
-        args.data_root, process_proof, include_synthetic=False, show_progress=True
+        args.data_root, process_proof, include_synthetic=True, show_progress=True, lightmode = args.lightmode
     )
 
-    for split in ["train", "valid"]:
-        for i, step in enumerate(proof_steps[split]):
-            dirname = os.path.join(args.output, split)
+    for category in ["train", "valid", "test"]:
+        for i, step in enumerate(proof_steps[category]):
+            dirname = os.path.join(args.output, category)
             if not os.path.exists(dirname):
                 os.makedirs(dirname)
-            if args.filter:
-                pickle.dump(
-                    step,
-                    open(
-                        os.path.join(dirname, "%s-%08d.pickle" % (args.filter, i)), "wb"
-                    ),
-                )
-            else:
-                pickle.dump(step, open(os.path.join(dirname, "%08d.pickle" % i), "wb"))
+            pickle.dump(step, open(os.path.join(dirname, "%08d.pickle" % i), "wb"))
 
     print("\nOutput saved to ", args.output)
